@@ -1,12 +1,16 @@
 import os
 import json
+from io import BytesIO
+
 import numpy as np
 import tensorflow as tf
 
 from flask import Flask, request, jsonify
 from tensorflow.keras.preprocessing import image
 
+
 app = Flask(__name__)
+
 
 # -----------------------------------
 # PATHS
@@ -24,6 +28,7 @@ CLASS_NAMES_PATH = os.path.join(
     "class_names.json"
 )
 
+
 # -----------------------------------
 # LOAD MODEL
 # -----------------------------------
@@ -34,6 +39,7 @@ model = tf.keras.models.load_model(MODEL_PATH)
 
 print("Model loaded successfully.")
 
+
 # -----------------------------------
 # LOAD CLASS NAMES
 # -----------------------------------
@@ -42,6 +48,7 @@ with open(CLASS_NAMES_PATH, "r") as file:
     class_names = json.load(file)
 
 print(f"Loaded {len(class_names)} classes.")
+
 
 # -----------------------------------
 # HEALTH CHECK
@@ -62,7 +69,7 @@ def home():
 @app.route("/predict", methods=["POST"])
 def predict():
 
-    # Check image
+    # Check whether image exists
     if "image" not in request.files:
         return jsonify({
             "error": "No image file provided"
@@ -70,18 +77,39 @@ def predict():
 
     file = request.files["image"]
 
+    # Check whether file is selected
     if file.filename == "":
         return jsonify({
             "error": "No image selected"
         }), 400
 
     try:
-        # Load image directly from uploaded file
+
+        print("Received image:", file.filename)
+
+        # -----------------------------------
+        # CONVERT FLASK FILESTORAGE TO BYTES
+        # -----------------------------------
+
+        image_data = file.read()
+
+        if not image_data:
+            return jsonify({
+                "error": "Uploaded image is empty"
+            }), 400
+
+        image_bytes = BytesIO(image_data)
+
+        # -----------------------------------
+        # LOAD IMAGE
+        # -----------------------------------
+
         img = image.load_img(
-    file.stream,
-    target_size=(224, 224)
-)
-        # Convert image to array
+            image_bytes,
+            target_size=(224, 224)
+        )
+
+        # Convert image to NumPy array
         img_array = image.img_to_array(img)
 
         # Add batch dimension
@@ -90,32 +118,34 @@ def predict():
             axis=0
         )
 
-        # IMPORTANT:
-        # Your trained model already contains:
-        # layers.Rescaling(1./127.5, offset=-1)
-        #
-        # Therefore DO NOT preprocess the image
-        # again using mobilenet_v2.preprocess_input()
+        # -----------------------------------
+        # MAKE PREDICTION
+        # -----------------------------------
 
-        # Make prediction
         predictions = model.predict(
             img_array,
             verbose=0
         )
 
-        # Get highest probability
+        # Get predicted class index
         predicted_index = int(
             np.argmax(predictions[0])
         )
 
+        # Get confidence percentage
         confidence = float(
             np.max(predictions[0]) * 100
         )
 
         # Get predicted class
-        predicted_class = class_names[
-            predicted_index
-        ]
+        predicted_class = class_names[predicted_index]
+
+        print(
+            "Prediction:",
+            predicted_class,
+            "| Confidence:",
+            confidence
+        )
 
         # -----------------------------------
         # SEPARATE CROP AND DISEASE
@@ -160,7 +190,7 @@ def predict():
         # RETURN RESULT
         # -----------------------------------
 
-        return jsonify({
+        result = {
             "crop": crop,
             "disease": disease,
             "status": status,
@@ -168,7 +198,11 @@ def predict():
                 confidence,
                 2
             )
-        })
+        }
+
+        print("Returning result:", result)
+
+        return jsonify(result)
 
     except Exception as error:
 
