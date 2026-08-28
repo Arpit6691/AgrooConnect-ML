@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.pyc
+
+# Dataset is large and not needed for prediction API
+dataset/
+
+# Test images
+*.JPG
+*.jpg
+*.jpeg
+*.png
+
+# Keep only the main trained model
+plant_disease_model_6_classes.keras
