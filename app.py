@@ -78,10 +78,9 @@ def predict():
     try:
         # Load image directly from uploaded file
         img = image.load_img(
-            file,
-            target_size=(224, 224)
-        )
-
+    file.stream,
+    target_size=(224, 224)
+)
         # Convert image to array
         img_array = image.img_to_array(img)
 
