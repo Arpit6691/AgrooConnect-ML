@@ -1,22 +1,24 @@
 
-
 import os
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["TF_NUM_INTRAOP_THREADS"] = "1"
-os.environ["TF_NUM_INTEROP_THREADS"] = "1"
 
-
- 
 import json
 from io import BytesIO
 
 import numpy as np
-import tensorflow as tf
+from PIL import Image
 
 from flask import Flask, request, jsonify
-from tensorflow.keras.preprocessing import image
+
+# Try to use lightweight TensorFlow Lite runtime.
+# This should be installed as tflite-runtime on deployment.
+try:
+    from tflite_runtime.interpreter import Interpreter
+except ImportError:
+    # Fallback for local testing if full TensorFlow is installed.
+    import tensorflow as tf
+    Interpreter = tf.lite.Interpreter
 
 
 app = Flask(__name__)
@@ -26,11 +28,13 @@ app = Flask(__name__)
 # PATHS
 # -----------------------------------
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
+)
 
 MODEL_PATH = os.path.join(
     BASE_DIR,
-    "plant_disease_model.keras"
+    "plant_disease_model.tflite"
 )
 
 CLASS_NAMES_PATH = os.path.join(
@@ -40,24 +44,40 @@ CLASS_NAMES_PATH = os.path.join(
 
 
 # -----------------------------------
-# LOAD MODEL
+# LOAD TFLITE MODEL
 # -----------------------------------
 
-print("Loading plant disease model...")
+print("Loading TensorFlow Lite model...")
 
-model = tf.keras.models.load_model(MODEL_PATH)
+interpreter = Interpreter(
+    model_path=MODEL_PATH,
+    num_threads=1
+)
 
-print("Model loaded successfully.")
+interpreter.allocate_tensors()
+
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+print("TFLite model loaded successfully.")
+print("Input details:", input_details)
+print("Output details:", output_details)
 
 
 # -----------------------------------
 # LOAD CLASS NAMES
 # -----------------------------------
 
-with open(CLASS_NAMES_PATH, "r") as file:
+with open(
+    CLASS_NAMES_PATH,
+    "r"
+) as file:
+
     class_names = json.load(file)
 
-print(f"Loaded {len(class_names)} classes.")
+print(
+    f"Loaded {len(class_names)} classes."
+)
 
 
 # -----------------------------------
@@ -66,8 +86,9 @@ print(f"Loaded {len(class_names)} classes.")
 
 @app.route("/", methods=["GET"])
 def home():
+
     return jsonify({
-        "message": "AgrooConnect ML API is running",
+        "message": "AgrooConnect ML TFLite API is running",
         "classes": len(class_names)
     })
 
@@ -81,6 +102,7 @@ def predict():
 
     # Check whether image exists
     if "image" not in request.files:
+
         return jsonify({
             "error": "No image file provided"
         }), 400
@@ -89,38 +111,53 @@ def predict():
 
     # Check whether file is selected
     if file.filename == "":
+
         return jsonify({
             "error": "No image selected"
         }), 400
 
     try:
 
-        print("Received image:", file.filename)
+        print(
+            "Received image:",
+            file.filename
+        )
+
 
         # -----------------------------------
-        # CONVERT FLASK FILESTORAGE TO BYTES
+        # READ IMAGE BYTES
         # -----------------------------------
 
         image_data = file.read()
 
         if not image_data:
+
             return jsonify({
                 "error": "Uploaded image is empty"
             }), 400
 
-        image_bytes = BytesIO(image_data)
 
         # -----------------------------------
-        # LOAD IMAGE
+        # LOAD IMAGE USING PIL
         # -----------------------------------
 
-        img = image.load_img(
-            image_bytes,
-            target_size=(224, 224)
+        img = Image.open(
+            BytesIO(image_data)
+        ).convert("RGB")
+
+        img = img.resize(
+            (224, 224)
         )
 
-        # Convert image to NumPy array
-        img_array = image.img_to_array(img)
+
+        # -----------------------------------
+        # CONVERT IMAGE TO NUMPY ARRAY
+        # -----------------------------------
+
+        img_array = np.array(
+            img,
+            dtype=np.float32
+        )
 
         # Add batch dimension
         img_array = np.expand_dims(
@@ -128,27 +165,46 @@ def predict():
             axis=0
         )
 
+
         # -----------------------------------
-        # MAKE PREDICTION
+        # RUN TFLITE PREDICTION
         # -----------------------------------
 
-        predictions = model.predict(
-            img_array,
-            verbose=0
+        input_index = input_details[0]["index"]
+
+        output_index = output_details[0]["index"]
+
+        interpreter.set_tensor(
+            input_index,
+            img_array
         )
 
-        # Get predicted class index
+        interpreter.invoke()
+
+        predictions = interpreter.get_tensor(
+            output_index
+        )
+
+
+        # -----------------------------------
+        # GET PREDICTION
+        # -----------------------------------
+
         predicted_index = int(
-            np.argmax(predictions[0])
+            np.argmax(
+                predictions[0]
+            )
         )
 
-        # Get confidence percentage
         confidence = float(
-            np.max(predictions[0]) * 100
+            np.max(
+                predictions[0]
+            ) * 100
         )
 
-        # Get predicted class
-        predicted_class = class_names[predicted_index]
+        predicted_class = class_names[
+            predicted_index
+        ]
 
         print(
             "Prediction:",
@@ -157,11 +213,14 @@ def predict():
             confidence
         )
 
+
         # -----------------------------------
         # SEPARATE CROP AND DISEASE
         # -----------------------------------
 
-        parts = predicted_class.split("___")
+        parts = predicted_class.split(
+            "___"
+        )
 
         crop = parts[0]
 
@@ -182,6 +241,7 @@ def predict():
             " "
         )
 
+
         # -----------------------------------
         # DETERMINE STATUS
         # -----------------------------------
@@ -195,6 +255,7 @@ def predict():
         else:
 
             status = "Diseased"
+
 
         # -----------------------------------
         # RETURN RESULT
@@ -210,9 +271,13 @@ def predict():
             )
         }
 
-        print("Returning result:", result)
+        print(
+            "Returning result:",
+            result
+        )
 
         return jsonify(result)
+
 
     except Exception as error:
 
