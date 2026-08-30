@@ -1,4 +1,3 @@
-
 import os
 
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -11,12 +10,9 @@ from PIL import Image
 
 from flask import Flask, request, jsonify
 
-# Try to use lightweight TensorFlow Lite runtime.
-# This should be installed as tflite-runtime on deployment.
 try:
     from tflite_runtime.interpreter import Interpreter
 except ImportError:
-    # Fallback for local testing if full TensorFlow is installed.
     import tensorflow as tf
     Interpreter = tf.lite.Interpreter
 
@@ -60,8 +56,6 @@ input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
 print("TFLite model loaded successfully.")
-print("Input details:", input_details)
-print("Output details:", output_details)
 
 
 # -----------------------------------
@@ -100,7 +94,6 @@ def home():
 @app.route("/predict", methods=["POST"])
 def predict():
 
-    # Check whether image exists
     if "image" not in request.files:
 
         return jsonify({
@@ -109,7 +102,6 @@ def predict():
 
     file = request.files["image"]
 
-    # Check whether file is selected
     if file.filename == "":
 
         return jsonify({
@@ -123,11 +115,7 @@ def predict():
             file.filename
         )
 
-
-        # -----------------------------------
-        # READ IMAGE BYTES
-        # -----------------------------------
-
+        # Read image
         image_data = file.read()
 
         if not image_data:
@@ -137,10 +125,7 @@ def predict():
             }), 400
 
 
-        # -----------------------------------
-        # LOAD IMAGE USING PIL
-        # -----------------------------------
-
+        # Load image
         img = Image.open(
             BytesIO(image_data)
         ).convert("RGB")
@@ -150,28 +135,20 @@ def predict():
         )
 
 
-        # -----------------------------------
-        # CONVERT IMAGE TO NUMPY ARRAY
-        # -----------------------------------
-
+        # Convert to NumPy
         img_array = np.array(
             img,
             dtype=np.float32
         )
 
-        # Add batch dimension
         img_array = np.expand_dims(
             img_array,
             axis=0
         )
 
 
-        # -----------------------------------
-        # RUN TFLITE PREDICTION
-        # -----------------------------------
-
+        # Run TFLite prediction
         input_index = input_details[0]["index"]
-
         output_index = output_details[0]["index"]
 
         interpreter.set_tensor(
@@ -186,10 +163,7 @@ def predict():
         )
 
 
-        # -----------------------------------
-        # GET PREDICTION
-        # -----------------------------------
-
+        # Get predicted class
         predicted_index = int(
             np.argmax(
                 predictions[0]
@@ -215,61 +189,73 @@ def predict():
 
 
         # -----------------------------------
-        # SEPARATE CROP AND DISEASE
+        # HANDLE INVALID IMAGE
         # -----------------------------------
 
-        parts = predicted_class.split(
-            "___"
-        )
+        if predicted_class == "Other_Invalid":
 
-        crop = parts[0]
-
-        crop = (
-            crop
-            .replace("_", " ")
-            .replace(",", "")
-        )
-
-        condition = (
-            parts[1]
-            if len(parts) > 1
-            else "Unknown"
-        )
-
-        disease = condition.replace(
-            "_",
-            " "
-        )
+            result = {
+                "crop": "Other",
+                "disease": "Invalid image",
+                "status": "Invalid",
+                "confidence": round(
+                    confidence,
+                    2
+                )
+            }
 
 
         # -----------------------------------
-        # DETERMINE STATUS
+        # HANDLE PLANT IMAGE
         # -----------------------------------
-
-        if disease.lower() == "healthy":
-
-            status = "Healthy"
-
-            disease = "Healthy"
 
         else:
 
-            status = "Diseased"
+            parts = predicted_class.split(
+                "___"
+            )
+
+            crop = (
+                parts[0]
+                .replace("_", " ")
+                .replace(",", "")
+            )
+
+            condition = (
+                parts[1]
+                if len(parts) > 1
+                else "Unknown"
+            )
+
+            disease = condition.replace(
+                "_",
+                " "
+            )
+
+            if disease.lower() == "healthy":
+
+                status = "Healthy"
+                disease = "Healthy"
+
+            else:
+
+                status = "Diseased"
+
+
+            result = {
+                "crop": crop,
+                "disease": disease,
+                "status": status,
+                "confidence": round(
+                    confidence,
+                    2
+                )
+            }
 
 
         # -----------------------------------
         # RETURN RESULT
         # -----------------------------------
-
-        result = {
-            "crop": crop,
-            "disease": disease,
-            "status": status,
-            "confidence": round(
-                confidence,
-                2
-            )
-        }
 
         print(
             "Returning result:",

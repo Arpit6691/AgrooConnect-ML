@@ -1,76 +1,68 @@
-import tensorflow as tf
+import sys
+import json
 import numpy as np
+import tensorflow as tf
 from tensorflow.keras.preprocessing import image
 
-# -----------------------------
-# LOAD TRAINED MODEL
-# -----------------------------
+MODEL_PATH = "plant_disease_model.keras"
+CLASS_NAMES_PATH = "class_names.json"
 
-model = tf.keras.models.load_model(
-    "plant_disease_model.keras"
-)
+print("Loading 39-class model...")
 
-# -----------------------------
-# CLASS NAMES
-# IMPORTANT: Must be in the
-# same order as training
-# -----------------------------
+# Load model
+model = tf.keras.models.load_model(MODEL_PATH)
 
-class_names = [
-    "Potato___Early_blight",
-    "Potato___Late_blight",
-    "Potato___healthy",
-    "Tomato___Early_blight",
-    "Tomato___Late_blight",
-    "Tomato___healthy"
-]
+# Load correct 39 class names
+with open(CLASS_NAMES_PATH, "r") as file:
+    class_names = json.load(file)
 
-# -----------------------------
-# IMAGE PATH
-# -----------------------------
+print("Model loaded successfully.")
+print(f"Loaded {len(class_names)} classes.")
 
-IMAGE_PATH = "test_leaf.jpg"
+# Get image path from command line
+if len(sys.argv) < 2:
+    print("\nUsage:")
+    print('python predict.py "image_name.jpg"')
+    sys.exit(1)
 
-# -----------------------------
-# LOAD AND PREPROCESS IMAGE
-# -----------------------------
+IMAGE_PATH = sys.argv[1]
 
+# Load image
 img = image.load_img(
     IMAGE_PATH,
     target_size=(224, 224)
 )
 
+# Convert to array
 img_array = image.img_to_array(img)
 
+# Add batch dimension
 img_array = np.expand_dims(
     img_array,
     axis=0
 )
 
-# -----------------------------
-# MAKE PREDICTION
-# -----------------------------
-
-predictions = model.predict(img_array)
+# Predict
+predictions = model.predict(
+    img_array,
+    verbose=0
+)
 
 score = predictions[0]
 
-predicted_index = np.argmax(score)
+predicted_index = int(np.argmax(score))
+confidence = float(score[predicted_index] * 100)
+
+# Safety check
+if predicted_index >= len(class_names):
+    raise ValueError(
+        f"Model predicted index {predicted_index}, "
+        f"but only {len(class_names)} class names exist."
+    )
 
 predicted_class = class_names[predicted_index]
 
-confidence = float(
-    score[predicted_index] * 100
-)
-
-# -----------------------------
-# SHOW RESULT
-# -----------------------------
-
 print("\n========== RESULT ==========")
-
 print("Prediction:", predicted_class)
-
 print(f"Confidence: {confidence:.2f}%")
-
 print("============================\n")
